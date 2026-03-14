@@ -144,9 +144,13 @@ async def _run_full(scenario, skip_judge: bool) -> EvalRun:
         eval_run.responses, eval_run.deterministic
     )
 
-    # Phase 4: LLM judge
+    # Phase 4: LLM judge + cross-language comparison
     if not skip_judge:
-        eval_run.judge_results = await run_judge_analysis(eval_run.responses, scenario)
+        judge_results, cross_lang = await run_judge_analysis(
+            eval_run.responses, scenario
+        )
+        eval_run.judge_results = judge_results
+        eval_run.cross_language = cross_lang
 
     return eval_run
 

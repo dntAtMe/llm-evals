@@ -20,21 +20,21 @@ LANG_COLORS = [
 ]
 
 CATEGORY_MARKERS = {
-    "varieties": "o",
+    "plants": "o",
     "techniques": "s",
     "timing": "D",
     "tools_products": "^",
 }
 
 CATEGORY_LABELS = {
-    "varieties": "Varieties",
+    "plants": "Plants",
     "techniques": "Techniques",
     "timing": "Timing",
     "tools_products": "Tools & Products",
 }
 
 CATEGORY_COLORS = {
-    "varieties": "#4C72B0",
+    "plants": "#4C72B0",
     "techniques": "#DD8452",
     "timing": "#55A868",
     "tools_products": "#C44E52",
@@ -47,7 +47,7 @@ def _collect_categorized_terms(jr: JudgeResult) -> dict[str, list[str]]:
         return {}
     et = jr.extracted_terms
     result: dict[str, list[str]] = {}
-    for cat in ("varieties", "techniques", "timing", "tools_products"):
+    for cat in ("plants", "techniques", "timing", "tools_products"):
         terms = getattr(et, cat)
         if terms:
             result[cat] = [t.lower().strip() for t in terms]
@@ -147,7 +147,7 @@ def _draw_bubble_chart(
     # Category legend
     legend_handles = []
     cats_present = {term_info[t][0] for t in sorted_terms}
-    for cat in ("varieties", "techniques", "timing", "tools_products"):
+    for cat in ("plants", "techniques", "timing", "tools_products"):
         if cat not in cats_present:
             continue
         handle = ax.scatter(
@@ -197,7 +197,7 @@ def _draw_column_chart(
 
         # Build rows: [(term, category), ...] grouped by category
         rows: list[tuple[str, str]] = []
-        for cat in ("varieties", "techniques", "timing", "tools_products"):
+        for cat in ("plants", "techniques", "timing", "tools_products"):
             terms = cat_terms.get(cat, [])
             if terms:
                 # Add category header

@@ -113,7 +113,7 @@ def print_summary(run: EvalRun) -> None:
         table.add_column("Model", style="magenta")
         table.add_column("Lang")
         table.add_column("Quality\n(S/A/Ac/C)")
-        table.add_column("Varieties (EN)")
+        table.add_column("Plants (EN)")
         table.add_column("Techniques (EN)")
         table.add_column("Timing (EN)")
 
@@ -124,7 +124,7 @@ def print_summary(run: EvalRun) -> None:
                 quality = f"{qs.specificity}/{qs.actionability}/{qs.accuracy}/{qs.completeness}"
 
             et = jr.extracted_terms
-            varieties = ", ".join(et.varieties[:6]) if et else ""
+            plants = ", ".join(et.plants[:6]) if et else ""
             techniques = ", ".join(et.techniques[:4]) if et else ""
             timing = ", ".join(et.timing[:4]) if et else ""
 
@@ -133,12 +133,60 @@ def print_summary(run: EvalRun) -> None:
                 f"{jr.provider}/{jr.model}",
                 jr.language,
                 quality,
-                varieties,
+                plants,
                 techniques,
                 timing,
             )
 
         console.print(table)
+
+    # --- Cross-language semantic differences ---
+    if run.cross_language:
+        table = Table(
+            title="Cross-language Semantic Differences",
+            show_lines=True,
+        )
+        table.add_column("Prompt", style="cyan")
+        table.add_column("Model", style="magenta")
+        table.add_column("Category")
+        table.add_column("Difference", max_width=60)
+        table.add_column("Languages")
+
+        for cl in run.cross_language:
+            model_str = f"{cl.provider}/{cl.model}"
+            if not cl.differences:
+                table.add_row(
+                    cl.prompt_id, model_str, "", "[dim]no differences found[/dim]", ""
+                )
+                continue
+            for i, diff in enumerate(cl.differences):
+                cat_colors = {
+                    "recommendations": "yellow",
+                    "assumptions": "red",
+                    "omissions": "magenta",
+                    "emphasis": "blue",
+                }
+                color = cat_colors.get(diff.category, "white")
+                cat = f"[{color}]{diff.category}[/{color}]"
+                langs = ", ".join(diff.languages_affected)
+                table.add_row(
+                    cl.prompt_id if i == 0 else "",
+                    model_str if i == 0 else "",
+                    cat,
+                    diff.description,
+                    langs,
+                )
+
+        console.print(table)
+
+        # Print summaries
+        for cl in run.cross_language:
+            if cl.summary:
+                console.print(
+                    f"  [dim]{cl.prompt_id} ({cl.provider}/{cl.model}):[/dim] "
+                    f"{cl.summary}"
+                )
+        console.print()
 
     # --- Keywords summary ---
     if run.deterministic:

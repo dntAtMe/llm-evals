@@ -96,7 +96,7 @@ class JudgeScore(BaseModel):
 class ExtractedTerms(BaseModel):
     """Key terms extracted from a response, translated to English."""
 
-    varieties: list[str] = []  # plant varieties / cultivars
+    plants: list[str] = []  # plant species, varieties, cultivars
     techniques: list[str] = []  # gardening methods / practices
     timing: list[str] = []  # planting dates, seasons, calendar refs
     tools_products: list[str] = []  # tools, fertilizers, products mentioned
@@ -111,6 +111,25 @@ class JudgeResult(BaseModel):
     language: str
     quality_scores: JudgeScore | None = None
     extracted_terms: ExtractedTerms | None = None
+
+
+class CrossLanguageDiff(BaseModel):
+    """Semantic difference found between responses in different languages."""
+
+    category: str  # e.g. "recommendations", "assumptions", "omissions", "emphasis"
+    description: str
+    languages_affected: list[str]
+
+
+class CrossLanguageComparison(BaseModel):
+    """LLM judge cross-language comparison for a (prompt, model) group."""
+
+    prompt_id: str
+    provider: str
+    model: str
+    languages: list[str]
+    differences: list[CrossLanguageDiff] = []
+    summary: str = ""
 
 
 class StatisticalResult(BaseModel):
@@ -135,5 +154,6 @@ class EvalRun(BaseModel):
     responses: list[LLMResponse]
     deterministic: list[DeterministicResult] = []
     judge_results: list[JudgeResult] = []
+    cross_language: list[CrossLanguageComparison] = []
     statistical: list[StatisticalResult] = []
     metadata: dict[str, Any] = {}

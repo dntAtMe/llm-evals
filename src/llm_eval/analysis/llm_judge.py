@@ -10,6 +10,8 @@ from rich.console import Console
 
 from llm_eval.engine.retry import with_retry
 from llm_eval.models import (
+    CrossLanguageComparison,
+    CrossLanguageDiff,
     ExtractedTerms,
     JudgeResult,
     JudgeScore,
@@ -47,7 +49,7 @@ The response may be in any language — translate ALL extracted terms to English
 {response}
 
 Extract terms into these categories:
-- **varieties**: specific plant varieties, cultivars, or species mentioned
+- **plants**: specific plant species, varieties, or cultivars mentioned
 - **techniques**: gardening methods, practices, or approaches
 - **timing**: planting dates, seasons, harvest periods, calendar references
 - **tools_products**: tools, fertilizers, soil amendments, products
@@ -60,7 +62,7 @@ Rules:
 
 Respond with ONLY a JSON object:
 {{
-    "varieties": ["term1", "term2"],
+    "plants": ["term1", "term2"],
     "techniques": ["term1", "term2"],
     "timing": ["term1", "term2"],
     "tools_products": ["term1", "term2"]
@@ -108,6 +110,81 @@ def _extract_json(text: str) -> dict:
     raise ValueError(f"Could not extract JSON from response: {text[:200]}")
 
 
+CROSS_LANGUAGE_PROMPT = """\
+You are comparing LLM responses to the SAME gardening question asked in different languages.
+Your goal is to find semantic differences — not translation artifacts, but actual differences \
+in advice, assumptions, recommendations, or information.
+
+**Question (asked identically in {n_langs} languages):**
+{question_en}
+
+{responses_block}
+
+Analyze the responses and identify concrete semantic differences. For each difference, classify it:
+- **recommendations**: different plants, products, or methods suggested
+- **assumptions**: different climate, region, or growing conditions assumed
+- **omissions**: information present in some languages but missing in others
+- **emphasis**: same topic but different priority or depth given to it
+
+Also provide a 2-3 sentence summary of the overall divergence.
+
+Respond with ONLY a JSON object:
+{{
+    "differences": [
+        {{
+            "category": "recommendations|assumptions|omissions|emphasis",
+            "description": "what differs (in English)",
+            "languages_affected": ["lang1", "lang2"]
+        }}
+    ],
+    "summary": "overall summary of divergence"
+}}
+"""
+
+
+async def _compare_cross_language(
+    judge_provider: str,
+    judge_model: str,
+    prompt_id: str,
+    provider: str,
+    model: str,
+    lang_responses: dict[str, LLMResponse],
+) -> CrossLanguageComparison:
+    """Compare responses across languages for the same prompt+model."""
+    languages = sorted(lang_responses.keys())
+
+    # Build the responses block
+    parts = []
+    for lang in languages:
+        resp = lang_responses[lang]
+        parts.append(f"**Response in {lang.upper()}:**\n{resp.response_text}")
+    responses_block = "\n\n---\n\n".join(parts)
+
+    # Use the first language's prompt text as reference
+    first_resp = lang_responses[languages[0]]
+    question_en = first_resp.prompt_text
+
+    data = await _judge_single(
+        judge_provider,
+        judge_model,
+        CROSS_LANGUAGE_PROMPT,
+        n_langs=str(len(languages)),
+        question_en=question_en,
+        responses_block=responses_block,
+    )
+
+    diffs = [CrossLanguageDiff(**d) for d in data.get("differences", [])]
+
+    return CrossLanguageComparison(
+        prompt_id=prompt_id,
+        provider=provider,
+        model=model,
+        languages=languages,
+        differences=diffs,
+        summary=data.get("summary", ""),
+    )
+
+
 async def _evaluate_group(
     judge_provider: str,
     judge_model: str,
@@ -150,16 +227,16 @@ async def _evaluate_group(
 async def run_judge_analysis(
     responses: list[LLMResponse],
     scenario: Scenario,
-) -> list[JudgeResult]:
-    """Run LLM judge analysis on all response groups."""
+) -> tuple[list[JudgeResult], list[CrossLanguageComparison]]:
+    """Run LLM judge analysis: per-language + cross-language comparison."""
     if not scenario.judge:
         console.print("[yellow]No judge configured, skipping judge analysis.[/yellow]")
-        return []
+        return [], []
 
     judge_provider = scenario.judge.provider
     judge_model = scenario.judge.model
 
-    # Group by (prompt_id, provider, model, language)
+    # --- Phase 1: Per-language evaluation ---
     groups: dict[tuple[str, str, str, str], list[LLMResponse]] = defaultdict(list)
     for r in responses:
         groups[(r.prompt_id, r.provider, r.model, r.language)].append(r)
@@ -196,4 +273,42 @@ async def run_judge_analysis(
         else:
             judge_results.append(r)
 
-    return judge_results
+    # --- Phase 2: Cross-language comparison ---
+    # Group by (prompt_id, provider, model) — pick one representative per language
+    cross_groups: dict[tuple[str, str, str], dict[str, LLMResponse]] = defaultdict(dict)
+    for r in responses:
+        key = (r.prompt_id, r.provider, r.model)
+        if r.language not in cross_groups[key]:
+            cross_groups[key][r.language] = r
+
+    # Only compare groups with 2+ languages
+    cross_tasks = []
+    cross_keys = []
+    for (prompt_id, provider, model), lang_responses in cross_groups.items():
+        if len(lang_responses) < 2:
+            continue
+        cross_keys.append((prompt_id, provider, model))
+        cross_tasks.append(
+            _compare_cross_language(
+                judge_provider, judge_model,
+                prompt_id, provider, model, lang_responses,
+            )
+        )
+
+    comparisons: list[CrossLanguageComparison] = []
+    if cross_tasks:
+        console.print(
+            f"[bold]Running cross-language comparison "
+            f"({len(cross_tasks)} groups)...[/bold]\n"
+        )
+        cross_results = await asyncio.gather(*cross_tasks, return_exceptions=True)
+        for i, r in enumerate(cross_results):
+            if isinstance(r, Exception):
+                pid, prov, mdl = cross_keys[i]
+                console.print(
+                    f"[red]Cross-language error [{pid}/{prov}]: {r}[/red]"
+                )
+            else:
+                comparisons.append(r)
+
+    return judge_results, comparisons
