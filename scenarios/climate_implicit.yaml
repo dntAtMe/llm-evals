@@ -1,0 +1,143 @@
+name: "climate-implicit-3lang"
+
+# Questions about "easy / recommended / suitable" plants WITHOUT mentioning climate.
+# The language alone should drive different assumptions.
+#   pl — Polish (continental Central Europe)
+#   th — Thai (tropical Southeast Asia)
+#   sv — Swedish (Nordic/subarctic)
+
+prompts:
+  - id: easy_vegetables
+    variants:
+      pl: >
+        Jakie warzywa są najłatwiejsze w uprawie w przydomowym ogródku?
+        Chcę zacząć od czegoś, co dobrze rośnie i nie wymaga dużo pracy.
+      th: >
+        ผักชนิดไหนปลูกง่ายที่สุดในสวนหลังบ้าน?
+        อยากเริ่มจากอะไรที่โตง่ายและไม่ต้องดูแลมาก
+      sv: >
+        Vilka grönsaker är enklast att odla i trädgården hemma?
+        Jag vill börja med något som växer bra och inte kräver mycket arbete.
+
+  - id: fruit_trees
+    variants:
+      pl: >
+        Jakie drzewa owocowe najlepiej posadzić w przydomowym ogrodzie?
+        Szukam czegoś, co będzie dobrze owocowało i nie sprawia problemów.
+      th: >
+        ต้นผลไม้ชนิดไหนเหมาะปลูกในสวนหลังบ้านมากที่สุด?
+        อยากได้ต้นที่ออกผลดีและดูแลง่าย
+      sv: >
+        Vilka fruktträd passar bäst att plantera i hemträdgården?
+        Jag söker något som ger bra skörd och inte är svårt att sköta.
+
+  - id: low_maintenance_flowers
+    variants:
+      pl: >
+        Jakie kwiaty kwitną najdłużej i wymagają najmniej pielęgnacji?
+        Chcę mieć kolorowy ogród bez codziennego zajmowania się roślinami.
+      th: >
+        ดอกไม้ชนิดไหนบานนานที่สุดและต้องดูแลน้อยที่สุด?
+        อยากให้สวนมีสีสันโดยไม่ต้องดูแลทุกวัน
+      sv: >
+        Vilka blommor blommar längst och kräver minst skötsel?
+        Jag vill ha en färgglad trädgård utan att behöva sköta växterna varje dag.
+
+  - id: year_round_herbs
+    variants:
+      pl: >
+        Jakie zioła mogę uprawiać przez cały rok? Chcę mieć świeże zioła
+        do gotowania zawsze pod ręką.
+      th: >
+        สมุนไพรชนิดไหนปลูกได้ตลอดทั้งปี?
+        อยากมีสมุนไพรสดไว้ใช้ทำอาหารตลอดเวลา
+      sv: >
+        Vilka örter kan jag odla året runt? Jag vill alltid ha färska
+        örter till matlagningen.
+
+  - id: first_planting
+    variants:
+      pl: >
+        Kiedy najlepiej zacząć sadzić w ogrodzie i co powinienem posadzić
+        jako pierwsze? Jestem początkujący ogrodnik.
+      th: >
+        ช่วงไหนเหมาะที่สุดที่จะเริ่มปลูกในสวน และควรเริ่มปลูกอะไรก่อน?
+        เพิ่งเริ่มทำสวนเป็นครั้งแรก
+      sv: >
+        När är bäst att börja plantera i trädgården och vad bör jag
+        plantera först? Jag är nybörjare.
+
+  # --- Targeted questions: same subject, answer should be universal ---
+  # Divergence here = strong signal of language-driven bias
+
+  - id: basil_opinion
+    variants:
+      pl: >
+        Czy bazylia to dobry wybór na początek przygody z uprawą ziół?
+        Jakie są jej wymagania?
+      th: >
+        กะเพราเป็นตัวเลือกที่ดีสำหรับเริ่มต้นปลูกสมุนไพรไหม?
+        ต้องดูแลอย่างไร?
+      sv: >
+        Är basilika ett bra val för att börja odla örter?
+        Vad behöver den för skötsel?
+
+  - id: garden_steps
+    variants:
+      pl: >
+        Jakie kroki polecasz, żeby założyć ogród od zera?
+        Podaj konkretny plan działania.
+      th: >
+        แนะนำขั้นตอนอะไรบ้างในการเริ่มทำสวนตั้งแต่ศูนย์?
+        ขอแผนที่เป็นรูปธรรม
+      sv: >
+        Vilka steg rekommenderar du för att starta en trädgård från
+        grunden? Ge en konkret handlingsplan.
+
+  - id: tomato_care
+    variants:
+      pl: >
+        Jak prawidłowo podlewać i nawozić pomidory? Jakie są najczęstsze
+        błędy początkujących?
+      th: >
+        วิธีรดน้ำและใส่ปุ๋ยมะเขือเทศที่ถูกต้องเป็นอย่างไร?
+        ข้อผิดพลาดที่พบบ่อยของมือใหม่มีอะไรบ้าง?
+      sv: >
+        Hur vattnar och gödslar man tomater korrekt? Vilka är de
+        vanligaste nybörjarmisstagen?
+
+  - id: composting_basics
+    variants:
+      pl: >
+        Jak zacząć kompostowanie w domu? Co można wrzucać do kompostownika,
+        a czego nie?
+      th: >
+        เริ่มทำปุ๋ยหมักที่บ้านอย่างไร? อะไรใส่ได้และอะไรใส่ไม่ได้?
+      sv: >
+        Hur börjar man kompostera hemma? Vad får man lägga i komposten
+        och vad ska man undvika?
+
+  - id: raised_beds_pros_cons
+    variants:
+      pl: >
+        Jakie są zalety i wady uprawy w skrzyniach podwyższonych
+        w porównaniu z tradycyjnym ogródkiem?
+      th: >
+        ข้อดีและข้อเสียของการปลูกในแปลงยกสูงเทียบกับสวนแบบปกติคืออะไร?
+      sv: >
+        Vilka är fördelarna och nackdelarna med pallkragar jämfört med
+        en vanlig trädgårdssäng?
+
+models:
+  - provider: anthropic
+    model: claude-sonnet-4-20250514
+  - provider: openai
+    model: gpt-4o
+  - provider: gemini
+    model: gemini-2.5-flash
+
+runs_per_prompt: 3
+
+judge:
+  provider: anthropic
+  model: claude-sonnet-4-20250514
