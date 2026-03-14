@@ -13,7 +13,7 @@ def save_results_json(run: EvalRun, path: Path) -> None:
     """Save full structured results to JSON."""
     path.parent.mkdir(parents=True, exist_ok=True)
     data = run.model_dump(mode="json")
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False, default=str)
 
 

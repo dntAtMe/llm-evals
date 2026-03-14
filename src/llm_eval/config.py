@@ -23,7 +23,7 @@ def load_scenario(path: str | Path) -> Scenario:
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"Scenario file not found: {path}")
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         raw = yaml.safe_load(f)
     return Scenario.model_validate(raw)
 
