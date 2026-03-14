@@ -7,7 +7,6 @@ from pathlib import Path
 
 import matplotlib
 import matplotlib.pyplot as plt
-import numpy as np
 from rich.console import Console
 
 from llm_eval.models import EvalRun, JudgeResult
@@ -120,7 +119,7 @@ def _draw_bubble_chart(
                 )
 
     ax.set_xticks(range(n_langs))
-    ax.set_xticklabels([l.upper() for l in languages], fontsize=11, fontweight="bold")
+    ax.set_xticklabels([la.upper() for la in languages], fontsize=11, fontweight="bold")
     ax.set_yticks(range(len(sorted_terms)))
     ax.set_yticklabels(sorted_terms, fontsize=9)
     ax.set_xlim(-0.5, n_langs - 0.5)

@@ -85,14 +85,27 @@ async def _judge_single(
     )
 
     text = result.text.strip()
-    # Extract JSON from response (handle markdown code blocks)
-    if "```" in text:
-        start = text.find("{")
-        end = text.rfind("}") + 1
-        if start >= 0 and end > start:
-            text = text[start:end]
+    return _extract_json(text)
 
-    return json.loads(text)
+
+def _extract_json(text: str) -> dict:
+    """Extract a JSON object from potentially messy LLM output."""
+    # Try direct parse first
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Find the outermost { ... } in the text
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            return json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    raise ValueError(f"Could not extract JSON from response: {text[:200]}")
 
 
 async def _evaluate_group(
@@ -173,9 +186,13 @@ async def run_judge_analysis(
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     judge_results: list[JudgeResult] = []
-    for r in results:
+    keys = list(groups.keys())
+    for i, r in enumerate(results):
         if isinstance(r, Exception):
-            console.print(f"[red]Judge error: {r}[/red]")
+            prompt_id, prov, mdl, lang = keys[i]
+            console.print(
+                f"[red]Judge error [{prompt_id}/{lang}]: {r}[/red]"
+            )
         else:
             judge_results.append(r)
 
