@@ -69,7 +69,31 @@ TH_STOPWORDS = {
     "ทำ", "จึง", "ถึง", "ครับ", "ค่ะ", "นั้น", "บ้าง", "อย่าง",
 }
 
-STOPWORDS = {"en": EN_STOPWORDS, "pl": PL_STOPWORDS, "sv": SV_STOPWORDS, "th": TH_STOPWORDS}
+JA_STOPWORDS = {
+    # Particles
+    "は", "が", "を", "に", "で", "と", "の", "も", "や", "か", "へ", "より",
+    "から", "まで", "として", "について", "によって", "において", "に対して",
+    # Auxiliary verbs / copula
+    "です", "ます", "ある", "いる", "する", "なる", "れる", "られる", "せる",
+    "させる", "ない", "ません", "でした", "ました", "だ", "た", "て", "で",
+    # Conjunctions / connectives
+    "そして", "また", "しかし", "ただし", "なお", "さらに", "つまり", "例えば",
+    "ので", "けど", "が", "ば", "たら", "ながら", "ため", "ように", "ことが",
+    # Common short words / pronouns
+    "この", "その", "あの", "どの", "これ", "それ", "あれ", "どれ", "ここ",
+    "そこ", "あそこ", "私", "あなた", "彼", "彼女", "私たち", "など", "等",
+    "こと", "もの", "とき", "ところ", "よう", "ほう", "方", "時", "中",
+    # Numbers / counters commonly used as filler
+    "一", "二", "三", "四", "五", "六", "七", "八", "九", "十",
+}
+
+STOPWORDS = {
+    "en": EN_STOPWORDS,
+    "pl": PL_STOPWORDS,
+    "sv": SV_STOPWORDS,
+    "th": TH_STOPWORDS,
+    "ja": JA_STOPWORDS,
+}
 
 
 def _get_embed_model():
@@ -98,13 +122,23 @@ def _pairwise_mean_similarity(embeddings: list[np.ndarray]) -> float:
     return float(np.mean(sims))
 
 
+_CJK_PATTERN = re.compile(r"[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]{2,}")
+_LATIN_PATTERN = re.compile(r"[a-zA-ZąćęłńóśźżĄĆĘŁŃÓŚŹŻ]{3,}")
+
+
 def _extract_keywords(texts: list[str], language: str, top_n: int = 15) -> list[str]:
     """Extract top keywords by term frequency, filtering stopwords."""
     stopwords = STOPWORDS.get(language, set())
     word_counts: dict[str, int] = defaultdict(int)
     for text in texts:
-        words = re.findall(r"[a-zA-ZąćęłńóśźżĄĆĘŁŃÓŚŹŻ]{3,}", text.lower())
-        for w in words:
+        # CJK languages: extract character sequences (no lowercasing — case doesn't apply)
+        cjk_words = _CJK_PATTERN.findall(text)
+        for w in cjk_words:
+            if w not in stopwords:
+                word_counts[w] += 1
+        # Latin-script words (covers EN, PL, SV, romanized terms mixed into CJK text)
+        latin_words = _LATIN_PATTERN.findall(text.lower())
+        for w in latin_words:
             if w not in stopwords:
                 word_counts[w] += 1
     sorted_words = sorted(word_counts.items(), key=lambda x: x[1], reverse=True)
