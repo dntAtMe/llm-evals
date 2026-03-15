@@ -31,6 +31,22 @@ class JudgeSpec(BaseModel):
     model: str
 
 
+class ScoreDimension(BaseModel):
+    """A scoring dimension for quality evaluation."""
+
+    name: str
+    description: str
+
+
+class JudgeConfig(BaseModel):
+    """Scenario-specific judge configuration: dimensions and optional prompt overrides."""
+
+    dimensions: list[ScoreDimension] | None = None
+    quality_prompt: str | None = None  # Full template; auto-built from dimensions if None
+    term_extraction_prompt: str | None = None
+    cross_language_prompt: str | None = None
+
+
 class Scenario(BaseModel):
     """A complete evaluation scenario loaded from YAML."""
 
@@ -39,6 +55,7 @@ class Scenario(BaseModel):
     models: list[ModelSpec]
     runs_per_prompt: int = 5
     judge: JudgeSpec | None = None
+    judge_config: JudgeConfig | None = None
 
 
 # --- Runtime models ---
@@ -87,10 +104,7 @@ class DeterministicResult(BaseModel):
 
 
 class JudgeScore(BaseModel):
-    specificity: int = Field(ge=1, le=5)
-    actionability: int = Field(ge=1, le=5)
-    accuracy: int = Field(ge=1, le=5)
-    completeness: int = Field(ge=1, le=5)
+    scores: dict[str, int]  # dimension_name -> score (1-5)
 
 
 class ExtractedTerms(BaseModel):

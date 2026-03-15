@@ -13,33 +13,23 @@ from llm_eval.models import (
     CrossLanguageComparison,
     CrossLanguageDiff,
     ExtractedTerms,
+    JudgeConfig,
     JudgeResult,
     JudgeScore,
     LLMResponse,
+    ScoreDimension,
     Scenario,
 )
 from llm_eval.providers import get_provider
 
 console = Console(stderr=True)
 
-QUALITY_PROMPT = """\
-You are evaluating an LLM's response to a gardening question.
-
-**Question ({language}):**
-{prompt}
-
-**Response:**
-{response}
-
-Rate the response on these dimensions (1=poor, 5=excellent):
-- **Specificity**: Does it give concrete, specific advice (varieties, dates, measurements)?
-- **Actionability**: Can someone follow this advice step-by-step?
-- **Accuracy**: Is the horticultural information correct?
-- **Completeness**: Does it cover the main aspects of the question?
-
-Respond with ONLY a JSON object:
-{{"specificity": N, "actionability": N, "accuracy": N, "completeness": N}}
-"""
+_DEFAULT_DIMENSIONS: list[ScoreDimension] = [
+    ScoreDimension(name="specificity", description="Does it give concrete, specific advice (varieties, dates, measurements)?"),
+    ScoreDimension(name="actionability", description="Can someone follow this advice step-by-step?"),
+    ScoreDimension(name="accuracy", description="Is the horticultural information correct?"),
+    ScoreDimension(name="completeness", description="Does it cover the main aspects of the question?"),
+]
 
 TERM_EXTRACTION_PROMPT = """\
 Extract key gardening terms from this LLM response. \
@@ -68,6 +58,40 @@ Respond with ONLY a JSON object:
     "tools_products": ["term1", "term2"]
 }}
 """
+
+
+def _build_quality_prompt(dimensions: list[ScoreDimension]) -> str:
+    """Build a quality-evaluation prompt template from scoring dimensions."""
+    dims_lines = "\n".join(
+        f"- **{d.name.replace('_', ' ').title()}**: {d.description}"
+        for d in dimensions
+    )
+    json_keys = ", ".join(f'"{d.name}": N' for d in dimensions)
+    return (
+        "You are evaluating an LLM's response to a question.\n\n"
+        "**Question ({language}):**\n{prompt}\n\n"
+        "**Response:**\n{response}\n\n"
+        f"Rate the response on these dimensions (1=poor, 5=excellent):\n{dims_lines}\n\n"
+        "Respond with ONLY a JSON object:\n"
+        "{{" + json_keys + "}}"
+    )
+
+
+def _resolve_prompts(judge_config: JudgeConfig | None) -> tuple[str, str]:
+    """Return (quality_prompt_template, term_extraction_prompt_template) to use."""
+    if judge_config and judge_config.quality_prompt:
+        quality = judge_config.quality_prompt
+    elif judge_config and judge_config.dimensions:
+        quality = _build_quality_prompt(judge_config.dimensions)
+    else:
+        quality = _build_quality_prompt(_DEFAULT_DIMENSIONS)
+
+    term_extraction = (
+        judge_config.term_extraction_prompt
+        if judge_config and judge_config.term_extraction_prompt
+        else TERM_EXTRACTION_PROMPT
+    )
+    return quality, term_extraction
 
 
 async def _judge_single(
@@ -149,6 +173,7 @@ async def _compare_cross_language(
     provider: str,
     model: str,
     lang_responses: dict[str, LLMResponse],
+    judge_config: JudgeConfig | None = None,
 ) -> CrossLanguageComparison:
     """Compare responses across languages for the same prompt+model."""
     languages = sorted(lang_responses.keys())
@@ -164,10 +189,16 @@ async def _compare_cross_language(
     first_resp = lang_responses[languages[0]]
     question_en = first_resp.prompt_text
 
+    cross_prompt = (
+        judge_config.cross_language_prompt
+        if judge_config and judge_config.cross_language_prompt
+        else CROSS_LANGUAGE_PROMPT
+    )
+
     data = await _judge_single(
         judge_provider,
         judge_model,
-        CROSS_LANGUAGE_PROMPT,
+        cross_prompt,
         n_langs=str(len(languages)),
         question_en=question_en,
         responses_block=responses_block,
@@ -193,15 +224,17 @@ async def _evaluate_group(
     model: str,
     language: str,
     responses: list[LLMResponse],
+    judge_config: JudgeConfig | None = None,
 ) -> JudgeResult:
     """Evaluate a group of responses (same prompt/model/language)."""
     rep = responses[0]
+    quality_prompt, term_prompt = _resolve_prompts(judge_config)
 
     quality_data, terms_data = await asyncio.gather(
         _judge_single(
             judge_provider,
             judge_model,
-            QUALITY_PROMPT,
+            quality_prompt,
             language=language,
             prompt=rep.prompt_text,
             response=rep.response_text,
@@ -209,7 +242,7 @@ async def _evaluate_group(
         _judge_single(
             judge_provider,
             judge_model,
-            TERM_EXTRACTION_PROMPT,
+            term_prompt,
             response=rep.response_text,
         ),
     )
@@ -219,7 +252,7 @@ async def _evaluate_group(
         provider=provider,
         model=model,
         language=language,
-        quality_scores=JudgeScore(**quality_data),
+        quality_scores=JudgeScore(scores=quality_data),
         extracted_terms=ExtractedTerms(**terms_data),
     )
 
@@ -246,6 +279,8 @@ async def run_judge_analysis(
         f"with {judge_provider}/{judge_model}...[/bold]\n"
     )
 
+    judge_config = scenario.judge_config
+
     tasks = []
     for (prompt_id, provider, model, language), group_responses in groups.items():
         tasks.append(
@@ -257,6 +292,7 @@ async def run_judge_analysis(
                 model,
                 language,
                 group_responses,
+                judge_config=judge_config,
             )
         )
 
@@ -292,6 +328,7 @@ async def run_judge_analysis(
             _compare_cross_language(
                 judge_provider, judge_model,
                 prompt_id, provider, model, lang_responses,
+                judge_config=judge_config,
             )
         )
 

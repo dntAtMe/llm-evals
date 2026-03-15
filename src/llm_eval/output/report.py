@@ -112,7 +112,7 @@ def print_summary(run: EvalRun) -> None:
         table.add_column("Prompt", style="cyan")
         table.add_column("Model", style="magenta")
         table.add_column("Lang")
-        table.add_column("Quality\n(S/A/Ac/C)")
+        table.add_column("Quality\n(scores)")
         table.add_column("Plants (EN)")
         table.add_column("Techniques (EN)")
         table.add_column("Timing (EN)")
@@ -120,8 +120,9 @@ def print_summary(run: EvalRun) -> None:
         for jr in run.judge_results:
             quality = ""
             if jr.quality_scores:
-                qs = jr.quality_scores
-                quality = f"{qs.specificity}/{qs.actionability}/{qs.accuracy}/{qs.completeness}"
+                quality = " ".join(
+                    f"{k[:4]}:{v}" for k, v in jr.quality_scores.scores.items()
+                )
 
             et = jr.extracted_terms
             plants = ", ".join(et.plants[:6]) if et else ""
