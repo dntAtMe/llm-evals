@@ -5,9 +5,58 @@ from __future__ import annotations
 from rich.console import Console
 from rich.table import Table
 
-from llm_eval.models import EvalRun
+from llm_eval.models import CrossLanguageComparison, EvalRun
 
 console = Console()
+
+
+def _print_cross_language_table(title: str, comparisons: list[CrossLanguageComparison]) -> None:
+    """Print one Rich table for a list of cross-language comparison results."""
+    if not comparisons:
+        return
+    table = Table(title=title, show_lines=True)
+    table.add_column("Prompt", style="cyan")
+    table.add_column("Model", style="magenta")
+    table.add_column("Category")
+    table.add_column("Difference", max_width=60)
+    table.add_column("Languages")
+
+    for cl in comparisons:
+        model_str = f"{cl.provider}/{cl.model}"
+        if not cl.differences:
+            table.add_row(
+                cl.prompt_id, model_str, "", "[dim]no differences found[/dim]", ""
+            )
+            continue
+        for i, diff in enumerate(cl.differences):
+            cat_colors = {
+                "recommendations": "yellow",
+                "assumptions": "red",
+                "omissions": "magenta",
+                "emphasis": "blue",
+                "depth": "cyan",
+            }
+            color = cat_colors.get(diff.category, "white")
+            cat = f"[{color}]{diff.category}[/{color}]"
+            langs = ", ".join(diff.languages_affected)
+            table.add_row(
+                cl.prompt_id if i == 0 else "",
+                model_str if i == 0 else "",
+                cat,
+                diff.description,
+                langs,
+            )
+
+    console.print(table)
+
+    for cl in comparisons:
+        if cl.summary:
+            mode = cl.aggregation_mode or "legacy"
+            console.print(
+                f"  [dim]{cl.prompt_id} ({cl.provider}/{cl.model}) [{mode}]:[/dim] "
+                f"{cl.summary}"
+            )
+    console.print()
 
 
 def _detect_languages(run: EvalRun) -> list[str]:
@@ -141,53 +190,24 @@ def print_summary(run: EvalRun) -> None:
 
         console.print(table)
 
-    # --- Cross-language semantic differences ---
+    # --- Cross-language semantic differences (concat / summarized / legacy) ---
     if run.cross_language:
-        table = Table(
-            title="Cross-language Semantic Differences",
-            show_lines=True,
+        concat_cl = [c for c in run.cross_language if c.aggregation_mode == "concatenated"]
+        summ_cl = [c for c in run.cross_language if c.aggregation_mode == "summarized"]
+        legacy_cl = [c for c in run.cross_language if c.aggregation_mode is None]
+
+        _print_cross_language_table(
+            "Cross-language Semantic Differences (concatenated runs)",
+            concat_cl,
         )
-        table.add_column("Prompt", style="cyan")
-        table.add_column("Model", style="magenta")
-        table.add_column("Category")
-        table.add_column("Difference", max_width=60)
-        table.add_column("Languages")
-
-        for cl in run.cross_language:
-            model_str = f"{cl.provider}/{cl.model}"
-            if not cl.differences:
-                table.add_row(
-                    cl.prompt_id, model_str, "", "[dim]no differences found[/dim]", ""
-                )
-                continue
-            for i, diff in enumerate(cl.differences):
-                cat_colors = {
-                    "recommendations": "yellow",
-                    "assumptions": "red",
-                    "omissions": "magenta",
-                    "emphasis": "blue",
-                }
-                color = cat_colors.get(diff.category, "white")
-                cat = f"[{color}]{diff.category}[/{color}]"
-                langs = ", ".join(diff.languages_affected)
-                table.add_row(
-                    cl.prompt_id if i == 0 else "",
-                    model_str if i == 0 else "",
-                    cat,
-                    diff.description,
-                    langs,
-                )
-
-        console.print(table)
-
-        # Print summaries
-        for cl in run.cross_language:
-            if cl.summary:
-                console.print(
-                    f"  [dim]{cl.prompt_id} ({cl.provider}/{cl.model}):[/dim] "
-                    f"{cl.summary}"
-                )
-        console.print()
+        _print_cross_language_table(
+            "Cross-language Semantic Differences (from per-language summaries)",
+            summ_cl,
+        )
+        _print_cross_language_table(
+            "Cross-language Semantic Differences (legacy)",
+            legacy_cl,
+        )
 
     # --- Keywords summary ---
     if run.deterministic:

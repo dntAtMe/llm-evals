@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import defaultdict
+from typing import Literal
 
 from rich.console import Console
 
@@ -17,18 +18,32 @@ from llm_eval.models import (
     JudgeResult,
     JudgeScore,
     LLMResponse,
-    ScoreDimension,
     Scenario,
+    ScoreDimension,
 )
 from llm_eval.providers import get_provider
 
 console = Console(stderr=True)
 
 _DEFAULT_DIMENSIONS: list[ScoreDimension] = [
-    ScoreDimension(name="specificity", description="Does it give concrete, specific advice (varieties, dates, measurements)?"),
-    ScoreDimension(name="actionability", description="Can someone follow this advice step-by-step?"),
-    ScoreDimension(name="accuracy", description="Is the horticultural information correct?"),
-    ScoreDimension(name="completeness", description="Does it cover the main aspects of the question?"),
+    ScoreDimension(
+        name="specificity",
+        description=(
+            "Does it give concrete, specific advice (varieties, dates, measurements)?"
+        ),
+    ),
+    ScoreDimension(
+        name="actionability",
+        description="Can someone follow this advice step-by-step?",
+    ),
+    ScoreDimension(
+        name="accuracy",
+        description="Is the horticultural information correct?",
+    ),
+    ScoreDimension(
+        name="completeness",
+        description="Does it cover the main aspects of the question?",
+    ),
 ]
 
 TERM_EXTRACTION_PROMPT = """\
@@ -94,46 +109,6 @@ def _resolve_prompts(judge_config: JudgeConfig | None) -> tuple[str, str]:
     return quality, term_extraction
 
 
-async def _judge_single(
-    provider_name: str,
-    model: str,
-    prompt_template: str,
-    **kwargs: str,
-) -> dict:
-    """Call the judge model with a structured prompt and parse JSON response."""
-    provider = get_provider(provider_name)
-    prompt = prompt_template.format(**kwargs)
-
-    result = await with_retry(
-        lambda: provider.complete(prompt, model),
-        label=f"judge:{provider_name}/{model}",
-        max_retries=2,
-    )
-
-    text = result.text.strip()
-    return _extract_json(text)
-
-
-def _extract_json(text: str) -> dict:
-    """Extract a JSON object from potentially messy LLM output."""
-    # Try direct parse first
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    # Find the outermost { ... } in the text
-    start = text.find("{")
-    end = text.rfind("}")
-    if start >= 0 and end > start:
-        try:
-            return json.loads(text[start : end + 1])
-        except json.JSONDecodeError:
-            pass
-
-    raise ValueError(f"Could not extract JSON from response: {text[:200]}")
-
-
 CROSS_LANGUAGE_PROMPT = """\
 You are comparing LLM responses to the SAME gardening question asked in different languages.
 Your goal is to find semantic differences — not translation artifacts, but actual differences \
@@ -165,6 +140,162 @@ Respond with ONLY a JSON object:
 }}
 """
 
+# Prepended when using a shared base template (cross_language_prompt or default) for concat mode.
+_CROSS_LANG_CONCAT_PREAMBLE = (
+    "Context: Below are MULTIPLE independent model outputs per language, "
+    "labeled Run 1, Run 2, etc. Compare across languages and account for "
+    "within-language variance when judging differences.\n\n"
+)
+
+# Prepended for summarized mode when using a shared base template.
+_CROSS_LANG_SUMMARY_PREAMBLE = (
+    "Context: Below each language is an English SUMMARY of multiple model runs in that language "
+    "(not the raw outputs). Compare across languages based on these summaries.\n\n"
+)
+
+
+def _base_cross_language_template(judge_config: JudgeConfig | None) -> str:
+    if judge_config and judge_config.cross_language_prompt:
+        return judge_config.cross_language_prompt
+    return CROSS_LANGUAGE_PROMPT
+
+
+def _resolve_concat_cross_prompt(judge_config: JudgeConfig | None) -> str:
+    if judge_config and judge_config.cross_language_concat_prompt:
+        return judge_config.cross_language_concat_prompt
+    return _CROSS_LANG_CONCAT_PREAMBLE + _base_cross_language_template(judge_config)
+
+
+def _resolve_summarized_cross_prompt(judge_config: JudgeConfig | None) -> str:
+    if judge_config and judge_config.cross_language_summarized_prompt:
+        return judge_config.cross_language_summarized_prompt
+    return _CROSS_LANG_SUMMARY_PREAMBLE + _base_cross_language_template(judge_config)
+
+
+SUMMARIZE_RUNS_PROMPT = """\
+You are synthesizing {n_runs} independent LLM responses to the same question
+(language code: {language}).
+The responses may differ due to randomness or substantive disagreement.
+
+**Question:**
+{question}
+
+**Responses (labeled):**
+{responses_block}
+
+Write a unified summary in English that:
+- Captures stable, recurring advice across runs
+- Briefly notes important disagreements between runs, if any
+- Ignores trivial wording differences
+
+Write 2–6 short paragraphs of prose. Do not use JSON or bullet lists as the primary structure.
+"""
+
+
+async def _judge_single(
+    provider_name: str,
+    model: str,
+    prompt_template: str,
+    **kwargs: str,
+) -> dict:
+    """Call the judge model with a structured prompt and parse JSON response."""
+    provider = get_provider(provider_name)
+    prompt = prompt_template.format(**kwargs)
+
+    result = await with_retry(
+        lambda: provider.complete(prompt, model),
+        label=f"judge:{provider_name}/{model}",
+        max_retries=2,
+    )
+
+    text = result.text.strip()
+    return _extract_json(text)
+
+
+async def _complete_plain(
+    provider_name: str,
+    model: str,
+    prompt: str,
+) -> str:
+    """Call the judge model and return raw text (no JSON parse)."""
+    provider = get_provider(provider_name)
+    result = await with_retry(
+        lambda: provider.complete(prompt, model),
+        label=f"judge:{provider_name}/{model}",
+        max_retries=2,
+    )
+    return result.text.strip()
+
+
+def _extract_json(text: str) -> dict:
+    """Extract a JSON object from potentially messy LLM output."""
+    # Try direct parse first
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Find the outermost { ... } in the text
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            return json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    raise ValueError(f"Could not extract JSON from response: {text[:200]}")
+
+
+def _build_concat_responses_block(by_lang: dict[str, list[LLMResponse]]) -> str:
+    """One section per language: labeled runs, joined across languages."""
+    languages = sorted(by_lang.keys())
+    outer: list[str] = []
+    for lang in languages:
+        runs = sorted(by_lang[lang], key=lambda r: r.run_index)
+        inner = "\n\n".join(
+            f"**Run {i + 1}:**\n{r.response_text}" for i, r in enumerate(runs)
+        )
+        outer.append(f"**Responses in {lang.upper()} ({len(runs)} run(s)):**\n{inner}")
+    return "\n\n---\n\n".join(outer)
+
+
+def _build_summary_responses_block(lang_to_summary: dict[str, str]) -> str:
+    """One section per language: English summary text."""
+    languages = sorted(lang_to_summary.keys())
+    parts = [f"**Summary for {lang.upper()}:**\n{lang_to_summary[lang]}" for lang in languages]
+    return "\n\n---\n\n".join(parts)
+
+
+async def _summarize_language_runs(
+    judge_provider: str,
+    judge_model: str,
+    language: str,
+    responses: list[LLMResponse],
+    judge_config: JudgeConfig | None,
+) -> str:
+    """Synthesize multiple runs in one language into English prose; single run returns raw text."""
+    runs = sorted(responses, key=lambda r: r.run_index)
+    if len(runs) == 1:
+        return runs[0].response_text
+
+    tmpl = (
+        judge_config.summarize_runs_prompt
+        if judge_config and judge_config.summarize_runs_prompt
+        else SUMMARIZE_RUNS_PROMPT
+    )
+    question = runs[0].prompt_text
+    block = "\n\n".join(
+        f"**Run {i + 1}:**\n{r.response_text}" for i, r in enumerate(runs)
+    )
+    prompt = tmpl.format(
+        language=language,
+        n_runs=str(len(runs)),
+        question=question,
+        responses_block=block,
+    )
+    return await _complete_plain(judge_provider, judge_model, prompt)
+
 
 async def _compare_cross_language(
     judge_provider: str,
@@ -172,33 +303,17 @@ async def _compare_cross_language(
     prompt_id: str,
     provider: str,
     model: str,
-    lang_responses: dict[str, LLMResponse],
-    judge_config: JudgeConfig | None = None,
+    languages: list[str],
+    question_en: str,
+    responses_block: str,
+    cross_prompt_template: str,
+    aggregation_mode: Literal["concatenated", "summarized"],
 ) -> CrossLanguageComparison:
-    """Compare responses across languages for the same prompt+model."""
-    languages = sorted(lang_responses.keys())
-
-    # Build the responses block
-    parts = []
-    for lang in languages:
-        resp = lang_responses[lang]
-        parts.append(f"**Response in {lang.upper()}:**\n{resp.response_text}")
-    responses_block = "\n\n---\n\n".join(parts)
-
-    # Use the first language's prompt text as reference
-    first_resp = lang_responses[languages[0]]
-    question_en = first_resp.prompt_text
-
-    cross_prompt = (
-        judge_config.cross_language_prompt
-        if judge_config and judge_config.cross_language_prompt
-        else CROSS_LANGUAGE_PROMPT
-    )
-
+    """Run cross-language JSON comparison with a pre-built responses block."""
     data = await _judge_single(
         judge_provider,
         judge_model,
-        cross_prompt,
+        cross_prompt_template,
         n_langs=str(len(languages)),
         question_en=question_en,
         responses_block=responses_block,
@@ -213,6 +328,7 @@ async def _compare_cross_language(
         languages=languages,
         differences=diffs,
         summary=data.get("summary", ""),
+        aggregation_mode=aggregation_mode,
     )
 
 
@@ -257,11 +373,27 @@ async def _evaluate_group(
     )
 
 
+def _cross_language_groups(
+    responses: list[LLMResponse],
+) -> dict[tuple[str, str, str], dict[str, list[LLMResponse]]]:
+    """(prompt_id, provider, model) -> language -> sorted list of runs."""
+    cross_groups: dict[tuple[str, str, str], dict[str, list[LLMResponse]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for r in responses:
+        key = (r.prompt_id, r.provider, r.model)
+        cross_groups[key][r.language].append(r)
+    for by_lang in cross_groups.values():
+        for lang in by_lang:
+            by_lang[lang].sort(key=lambda x: x.run_index)
+    return cross_groups
+
+
 async def run_judge_analysis(
     responses: list[LLMResponse],
     scenario: Scenario,
 ) -> tuple[list[JudgeResult], list[CrossLanguageComparison]]:
-    """Run LLM judge analysis: per-language + cross-language comparison."""
+    """Run LLM judge analysis: per-language + dual cross-language (concat + summarized)."""
     if not scenario.judge:
         console.print("[yellow]No judge configured, skipping judge analysis.[/yellow]")
         return [], []
@@ -309,43 +441,144 @@ async def run_judge_analysis(
         else:
             judge_results.append(r)
 
-    # --- Phase 2: Cross-language comparison ---
-    # Group by (prompt_id, provider, model) — pick one representative per language
-    cross_groups: dict[tuple[str, str, str], dict[str, LLMResponse]] = defaultdict(dict)
-    for r in responses:
-        key = (r.prompt_id, r.provider, r.model)
-        if r.language not in cross_groups[key]:
-            cross_groups[key][r.language] = r
+    # --- Phase 2: Cross-language (concatenated runs + summarized) ---
+    cross_groups = _cross_language_groups(responses)
+    group_items = [(k, v) for k, v in cross_groups.items() if len(v) >= 2]
+    group_items.sort(key=lambda x: (x[0][0], x[0][1], x[0][2]))
 
-    # Only compare groups with 2+ languages
-    cross_tasks = []
-    cross_keys = []
-    for (prompt_id, provider, model), lang_responses in cross_groups.items():
-        if len(lang_responses) < 2:
-            continue
-        cross_keys.append((prompt_id, provider, model))
-        cross_tasks.append(
+    if not group_items:
+        return judge_results, []
+
+    concat_tpl = _resolve_concat_cross_prompt(judge_config)
+    summarized_tpl = _resolve_summarized_cross_prompt(judge_config)
+
+    # Per-(group, lang) summaries — parallel; concat comparisons can run alongside
+    summarize_tasks: list[asyncio.Task[str]] = []
+    summarize_meta: list[tuple[tuple[str, str, str], str]] = []
+    for key, by_lang in group_items:
+        for lang, runs in by_lang.items():
+            summarize_meta.append((key, lang))
+            summarize_tasks.append(
+                asyncio.create_task(
+                    _summarize_language_runs(
+                        judge_provider,
+                        judge_model,
+                        lang,
+                        runs,
+                        judge_config,
+                    )
+                )
+            )
+
+    concat_tasks = []
+    concat_meta: list[tuple[str, str, str]] = []
+    for (prompt_id, provider, model), by_lang in group_items:
+        concat_meta.append((prompt_id, provider, model))
+        languages = sorted(by_lang.keys())
+        question_en = next(iter(by_lang.values()))[0].prompt_text
+        block = _build_concat_responses_block(by_lang)
+        concat_tasks.append(
             _compare_cross_language(
-                judge_provider, judge_model,
-                prompt_id, provider, model, lang_responses,
-                judge_config=judge_config,
+                judge_provider,
+                judge_model,
+                prompt_id,
+                provider,
+                model,
+                languages,
+                question_en,
+                block,
+                concat_tpl,
+                "concatenated",
             )
         )
 
-    comparisons: list[CrossLanguageComparison] = []
-    if cross_tasks:
-        console.print(
-            f"[bold]Running cross-language comparison "
-            f"({len(cross_tasks)} groups)...[/bold]\n"
+    console.print(
+        f"[bold]Running cross-language comparison: "
+        f"{len(concat_tasks)} concat + {len(concat_tasks)} summarized "
+        f"({len(summarize_tasks)} per-language summaries)...[/bold]\n"
+    )
+
+    concat_results, summ_text_results = await asyncio.gather(
+        asyncio.gather(*concat_tasks, return_exceptions=True),
+        asyncio.gather(*summarize_tasks, return_exceptions=True),
+    )
+
+    # Map (key, lang) -> summary text
+    lang_summaries: dict[tuple[tuple[str, str, str], str], str] = {}
+    for i, res in enumerate(summ_text_results):
+        key, lang = summarize_meta[i]
+        if isinstance(res, Exception):
+            pid, prov, mdl = key
+            console.print(
+                f"[red]Summarize error [{pid}/{lang}/{prov}]: {res}[/red]"
+            )
+            lang_summaries[(key, lang)] = ""
+        else:
+            lang_summaries[(key, lang)] = res
+
+    summary_compare_tasks = []
+    for (prompt_id, provider, model), by_lang in group_items:
+        key = (prompt_id, provider, model)
+        languages = sorted(by_lang.keys())
+        if any(not lang_summaries.get((key, L), "").strip() for L in languages):
+            # Skip if any summary failed (empty)
+            summary_compare_tasks.append(None)
+            continue
+        question_en = by_lang[languages[0]][0].prompt_text
+        block = _build_summary_responses_block(
+            {L: lang_summaries[(key, L)] for L in languages}
         )
-        cross_results = await asyncio.gather(*cross_tasks, return_exceptions=True)
-        for i, r in enumerate(cross_results):
-            if isinstance(r, Exception):
-                pid, prov, mdl = cross_keys[i]
-                console.print(
-                    f"[red]Cross-language error [{pid}/{prov}]: {r}[/red]"
-                )
-            else:
-                comparisons.append(r)
+        summary_compare_tasks.append(
+            _compare_cross_language(
+                judge_provider,
+                judge_model,
+                prompt_id,
+                provider,
+                model,
+                languages,
+                question_en,
+                block,
+                summarized_tpl,
+                "summarized",
+            )
+        )
+
+    summary_compare_results_raw = await asyncio.gather(
+        *[t for t in summary_compare_tasks if t is not None],
+        return_exceptions=True,
+    )
+
+    # Re-align summary results with group order (including skipped)
+    summary_iter = iter(summary_compare_results_raw)
+    summary_compare_results: list[CrossLanguageComparison | Exception | None] = []
+    for t in summary_compare_tasks:
+        if t is None:
+            summary_compare_results.append(None)
+        else:
+            summary_compare_results.append(next(summary_iter))
+
+    comparisons: list[CrossLanguageComparison] = []
+
+    for i, (prompt_id, provider, model) in enumerate(concat_meta):
+        cr = concat_results[i]
+        if isinstance(cr, Exception):
+            console.print(
+                f"[red]Cross-language (concat) error [{prompt_id}/{provider}]: {cr}[/red]"
+            )
+        else:
+            comparisons.append(cr)
+
+        sr = summary_compare_results[i]
+        if sr is None:
+            console.print(
+                f"[yellow]Cross-language (summarized) skipped [{prompt_id}/{provider}]: "
+                "missing summary[/yellow]"
+            )
+        elif isinstance(sr, Exception):
+            console.print(
+                f"[red]Cross-language (summarized) error [{prompt_id}/{provider}]: {sr}[/red]"
+            )
+        else:
+            comparisons.append(sr)
 
     return judge_results, comparisons

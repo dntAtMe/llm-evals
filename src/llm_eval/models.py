@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -39,12 +39,23 @@ class ScoreDimension(BaseModel):
 
 
 class JudgeConfig(BaseModel):
-    """Scenario-specific judge configuration: dimensions and optional prompt overrides."""
+    """Scenario-specific judge configuration: dimensions and optional prompt overrides.
+
+    Cross-language: `cross_language_prompt` is the shared comparison template unless
+    `cross_language_concat_prompt` / `cross_language_summarized_prompt` override a mode.
+    `summarize_runs_prompt` controls merging multiple runs per language before the
+    summarized cross-language pass. See scenarios/README.md.
+    """
 
     dimensions: list[ScoreDimension] | None = None
     quality_prompt: str | None = None  # Full template; auto-built from dimensions if None
     term_extraction_prompt: str | None = None
     cross_language_prompt: str | None = None
+    # Multi-run cross-language: optional overrides (see docs). If unset, cross_language_prompt
+    # or the built-in default is used with a mode-specific preamble for concat vs summarized.
+    summarize_runs_prompt: str | None = None
+    cross_language_concat_prompt: str | None = None
+    cross_language_summarized_prompt: str | None = None
 
 
 class Scenario(BaseModel):
@@ -144,6 +155,8 @@ class CrossLanguageComparison(BaseModel):
     languages: list[str]
     differences: list[CrossLanguageDiff] = []
     summary: str = ""
+    # "concatenated" / "summarized" for multi-run pipeline; None = legacy single-response runs
+    aggregation_mode: Literal["concatenated", "summarized"] | None = None
 
 
 class StatisticalResult(BaseModel):
